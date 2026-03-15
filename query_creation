@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WORKGROUP="primary"
+DATABASE="crm_monitoring_demo"
+DESCRIPTION_PREFIX="Autonomous CRM Volume Investigator - Tracing"
+PREP_PREFIX="Autonomous CRM Volume Investigator - Preprocessing"
+
+create_query() {
+  local name="$1"
+  local description="$2"
+  local query="$3"
+
+  echo "Creating named query: $name"
+  aws athena create-named-query \
+    --name "$name" \
+    --description "$description" \
+    --database "$DATABASE" \
+    --work-group "$WORKGROUP" \
+    --query-string "$query" || true
+
+  echo "Created: $name"
+}
+
+# --------------------------------------------------
+# 1) inv_prep_recent_vs_hist_volume
+# Deterministic candidate detection dataset
+# --------------------------------------------------
+
+PREP_RECENT_VS_HIST_VOLUME=$(cat <<'SQL'
+WITH base AS (
+    SELECT
+        country_code,
+        source,
+        CAST(created_date AS timestamp) AS created_ts
+    FROM leads
+    WHERE CAST(created_date AS timestamp) >= date_add('day', -35, current_timestamp)
+),
+agg AS (
+    SELECT
+        country_code,
+        source,
+        SUM(CASE WHEN created_ts >= date_add('day', -35, current_timestamp)
+                  AND created_ts <  date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS hist_28d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS last_7d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -3, current_timestamp) THEN 1 ELSE 0 END) AS last_3d_total_rows
+    FROM base
+    GROUP BY 1, 2
+)
+SELECT
+    country_code,
+    source,
+    ROUND(hist_28d_total_rows / 28.0, 2) AS hist_28d_avg_daily_rows,
+    ROUND(last_7d_total_rows / 7.0, 2) AS last_7d_avg_daily_rows,
+    hist_28d_total_rows,
+    last_7d_total_rows,
+    last_3d_total_rows,
+    CASE
+        WHEN hist_28d_total_rows > 0
+            THEN ROUND(((last_7d_total_rows / 7.0) / (hist_28d_total_rows / 28.0)) * 100.0, 2)
+        ELSE NULL
+    END AS recent_vs_hist_pct
+FROM agg
+ORDER BY recent_vs_hist_pct ASC NULLS LAST, hist_28d_total_rows DESC;
+SQL
+)
+
+# --------------------------------------------------
+# PREP: small random screening sample for one group
+# Keep this for the initial lightweight model check
+# --------------------------------------------------
+
+PREP_ROW_SAMPLING=$(cat <<'SQL'
+SELECT
+  lead_id,
+  first_name,
+  last_name,
+  email,
+  title,
+  company,
+  country_code,
+  source,
+  created_date
+FROM leads
+WHERE country_code = '{{country_code}}'
+  AND source = '{{source}}'
+  AND CAST(created_date AS timestamp) >= CURRENT_DATE - INTERVAL '1' DAY
+ORDER BY RANDOM()
+LIMIT 3;
+SQL
+)
+
+# --------------------------------------------------
+# 2) inv_trace_target_volume_trend
+# Daily target trend + baseline metrics
+# --------------------------------------------------
+
+TRACE_TARGET_VOLUME_TREND=$(cat <<'SQL'
+WITH target_rows AS (
+    SELECT
+        country_code,
+        source,
+        CAST(created_date AS timestamp) AS created_ts
+    FROM leads
+    WHERE country_code = '{{country_code}}'
+      AND source = '{{source}}'
+      AND CAST(created_date AS timestamp) >= date_add('day', -35, current_timestamp)
+),
+baseline AS (
+    SELECT
+        country_code,
+        source,
+        SUM(CASE WHEN created_ts >= date_add('day', -35, current_timestamp)
+                  AND created_ts <  date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS hist_28d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS last_7d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -3, current_timestamp) THEN 1 ELSE 0 END) AS last_3d_total_rows
+    FROM target_rows
+    GROUP BY 1, 2
+),
+days AS (
+    SELECT day_value
+    FROM UNNEST(
+        sequence(
+            CAST(date_add('day', -6, current_date) AS date),
+            CAST(current_date AS date),
+            INTERVAL '1' day
+        )
+    ) AS t(day_value)
+),
+daily AS (
+    SELECT
+        CAST(created_ts AS date) AS activity_date,
+        COUNT(*) AS rows_that_day
+    FROM target_rows
+    WHERE created_ts >= date_add('day', -7, current_timestamp)
+    GROUP BY 1
+)
+SELECT
+    '{{country_code}}' AS country_code,
+    '{{source}}' AS source,
+    CAST(d.day_value AS varchar) AS activity_date,
+    COALESCE(x.rows_that_day, 0) AS rows_that_day,
+    ROUND(b.hist_28d_total_rows / 28.0, 2) AS hist_28d_avg_daily_rows,
+    ROUND(b.last_7d_total_rows / 7.0, 2) AS last_7d_avg_daily_rows,
+    b.last_3d_total_rows,
+    CASE
+        WHEN b.hist_28d_total_rows > 0
+            THEN ROUND(((b.last_7d_total_rows / 7.0) / (b.hist_28d_total_rows / 28.0)) * 100.0, 2)
+        ELSE NULL
+    END AS recent_vs_hist_pct
+FROM days d
+CROSS JOIN baseline b
+LEFT JOIN daily x
+    ON x.activity_date = d.day_value
+ORDER BY activity_date;
+SQL
+)
+
+# --------------------------------------------------
+# 3) inv_trace_country_peer_volumes
+# Same-country peer comparison using relative drop vs baseline
+# --------------------------------------------------
+
+TRACE_COUNTRY_PEER_VOLUMES=$(cat <<'SQL'
+WITH country_rows AS (
+    SELECT
+        country_code,
+        source,
+        CAST(created_date AS timestamp) AS created_ts
+    FROM leads
+    WHERE country_code = '{{country_code}}'
+      AND CAST(created_date AS timestamp) >= date_add('day', -35, current_timestamp)
+),
+peer_agg AS (
+    SELECT
+        country_code,
+        source,
+        SUM(CASE WHEN created_ts >= date_add('day', -35, current_timestamp)
+                  AND created_ts <  date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS hist_28d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS last_7d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -3, current_timestamp) THEN 1 ELSE 0 END) AS last_3d_total_rows
+    FROM country_rows
+    GROUP BY 1, 2
+)
+SELECT
+    country_code,
+    source,
+    CASE WHEN source = '{{source}}' THEN 'target' ELSE 'peer' END AS comparison_role,
+    ROUND(hist_28d_total_rows / 28.0, 2) AS hist_28d_avg_daily_rows,
+    ROUND(last_7d_total_rows / 7.0, 2) AS last_7d_avg_daily_rows,
+    hist_28d_total_rows,
+    last_7d_total_rows,
+    last_3d_total_rows,
+    CASE
+        WHEN hist_28d_total_rows > 0
+            THEN ROUND(((last_7d_total_rows / 7.0) / (hist_28d_total_rows / 28.0)) * 100.0, 2)
+        ELSE NULL
+    END AS recent_vs_hist_pct
+FROM peer_agg
+ORDER BY
+    CASE WHEN source = '{{source}}' THEN 0 ELSE 1 END,
+    recent_vs_hist_pct ASC NULLS LAST,
+    hist_28d_total_rows DESC;
+SQL
+)
+
+# --------------------------------------------------
+# 4) inv_trace_source_family_peers
+# Same source family across countries using relative drop vs baseline
+# --------------------------------------------------
+
+TRACE_SOURCE_FAMILY_PEERS=$(cat <<'SQL'
+WITH params AS (
+    SELECT
+        '{{country_code}}' AS target_country_code,
+        '{{source}}' AS target_source,
+        CASE
+            WHEN regexp_like('{{source}}', '^[A-Z]{2}_.+')
+                THEN regexp_replace('{{source}}', '^[A-Z]{2}_', '')
+            ELSE '{{source}}'
+        END AS target_source_family
+),
+family_rows AS (
+    SELECT
+        l.country_code,
+        l.source,
+        CASE
+            WHEN regexp_like(l.source, '^[A-Z]{2}_.+')
+                THEN regexp_replace(l.source, '^[A-Z]{2}_', '')
+            ELSE l.source
+        END AS source_family,
+        CAST(l.created_date AS timestamp) AS created_ts
+    FROM leads l
+    CROSS JOIN params p
+    WHERE CAST(l.created_date AS timestamp) >= date_add('day', -35, current_timestamp)
+      AND (
+            CASE
+                WHEN regexp_like(l.source, '^[A-Z]{2}_.+')
+                    THEN regexp_replace(l.source, '^[A-Z]{2}_', '')
+                ELSE l.source
+            END
+          ) = p.target_source_family
+),
+family_agg AS (
+    SELECT
+        country_code,
+        source,
+        source_family,
+        SUM(CASE WHEN created_ts >= date_add('day', -35, current_timestamp)
+                  AND created_ts <  date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS hist_28d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS last_7d_total_rows,
+        SUM(CASE WHEN created_ts >= date_add('day', -3, current_timestamp) THEN 1 ELSE 0 END) AS last_3d_total_rows
+    FROM family_rows
+    GROUP BY 1, 2, 3
+)
+SELECT
+    f.country_code,
+    f.source,
+    f.source_family,
+    CASE WHEN f.country_code = p.target_country_code AND f.source = p.target_source THEN 'target' ELSE 'peer' END AS comparison_role,
+    ROUND(f.hist_28d_total_rows / 28.0, 2) AS hist_28d_avg_daily_rows,
+    ROUND(f.last_7d_total_rows / 7.0, 2) AS last_7d_avg_daily_rows,
+    f.hist_28d_total_rows,
+    f.last_7d_total_rows,
+    f.last_3d_total_rows,
+    CASE
+        WHEN f.hist_28d_total_rows > 0
+            THEN ROUND(((f.last_7d_total_rows / 7.0) / (f.hist_28d_total_rows / 28.0)) * 100.0, 2)
+        ELSE NULL
+    END AS recent_vs_hist_pct
+FROM family_agg f
+CROSS JOIN params p
+ORDER BY
+    CASE WHEN f.country_code = p.target_country_code AND f.source = p.target_source THEN 0 ELSE 1 END,
+    recent_vs_hist_pct ASC NULLS LAST,
+    hist_28d_total_rows DESC;
+SQL
+)
+
+# --------------------------------------------------
+# 5) inv_trace_target_last_seen
+# Last seen timestamp + recent counts
+# --------------------------------------------------
+
+TRACE_TARGET_LAST_SEEN=$(cat <<'SQL'
+WITH target_rows AS (
+    SELECT
+        country_code,
+        source,
+        CAST(created_date AS timestamp) AS created_ts
+    FROM leads
+    WHERE country_code = '{{country_code}}'
+      AND source = '{{source}}'
+)
+SELECT
+    '{{country_code}}' AS country_code,
+    '{{source}}' AS source,
+    MAX(created_ts) AS last_seen_row_timestamp,
+    SUM(CASE WHEN created_ts >= date_add('day', -7, current_timestamp) THEN 1 ELSE 0 END) AS last_7d_total_rows,
+    SUM(CASE WHEN created_ts >= date_add('day', -3, current_timestamp) THEN 1 ELSE 0 END) AS last_3d_total_rows
+FROM target_rows;
+SQL
+)
+
+# --------------------------------------------------
+# 6) inv_trace_recent_target_sample
+# Optional sample of recent target rows
+# --------------------------------------------------
+
+TRACE_RECENT_TARGET_SAMPLE=$(cat <<'SQL'
+SELECT
+    lead_id,
+    country_code,
+    source,
+    CAST(created_date AS timestamp) AS created_ts
+FROM leads
+WHERE country_code = '{{country_code}}'
+  AND source = '{{source}}'
+  AND CAST(created_date AS timestamp) >= date_add('day', -7, current_timestamp)
+ORDER BY created_ts DESC
+LIMIT 25;
+SQL
+)
+
+echo "Creating named queries..."
+
+create_query "inv_prep_recent_vs_hist_volume" \
+  "$PREP_PREFIX - Recent 7d vs historical 28d volume baseline by country and source" \
+  "$PREP_RECENT_VS_HIST_VOLUME"
+
+create_query "inv_prep_row_sampling" \
+  "$PREP_PREFIX - Small random screening sample for one group" \
+  "$PREP_ROW_SAMPLING"
+
+create_query "inv_trace_target_volume_trend" \
+  "$DESCRIPTION_PREFIX - 7-day daily trend for target country and source" \
+  "$TRACE_TARGET_VOLUME_TREND"
+
+create_query "inv_trace_country_peer_volumes" \
+  "$DESCRIPTION_PREFIX - Same-country peer source volumes for last 7 days" \
+  "$TRACE_COUNTRY_PEER_VOLUMES"
+
+create_query "inv_trace_source_family_peers" \
+  "$DESCRIPTION_PREFIX - Same source family across countries for last 7 days" \
+  "$TRACE_SOURCE_FAMILY_PEERS"
+
+create_query "inv_trace_target_last_seen" \
+  "$DESCRIPTION_PREFIX - Last seen timestamp and recent row windows for target group" \
+  "$TRACE_TARGET_LAST_SEEN"
+
+create_query "inv_trace_recent_target_sample" \
+  "$DESCRIPTION_PREFIX - Most recent rows for target group" \
+  "$TRACE_RECENT_TARGET_SAMPLE"
+
+echo
+echo "Done. Use ./recreate_investigator_queries.sh to create the volume investigator queries."

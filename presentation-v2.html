@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nova Pro v1 — Autonomous CRM Incident Investigator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:        #0c0e10;
+      --bg-2:      #141820;
+      --bg-card:   #1c2230;
+      --bg-card-2: #222b3a;
+      --ink:       #f0ece4;
+      --muted:     #8a96a8;
+      --dim:       #4a5568;
+      --border:    rgba(255,255,255,0.07);
+      --border-2:  rgba(255,255,255,0.12);
+      --aws:       #ff9900;
+      --aws-dim:   rgba(255,153,0,0.12);
+      --aws-glow:  rgba(255,153,0,0.22);
+      --red:       #ef4444;
+      --red-dim:   rgba(239,68,68,0.15);
+      --green:     #34d399;
+      --green-dim: rgba(52,211,153,0.12);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'DM Sans', system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── background texture ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 15% 85%, rgba(255,153,0,0.06) 0%, transparent 45%),
+        radial-gradient(ellipse at 85% 15%, rgba(52,211,153,0.04) 0%, transparent 35%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── topbar ── */
+    .topbar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(12,14,16,0.72);
+      backdrop-filter: blur(20px);
+      z-index: 50;
+    }
+
+    .aws-logo svg { display: block; }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .product-tag {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border: 1px solid var(--border-2);
+      padding: 5px 12px;
+      border-radius: 999px;
+    }
+
+    .slide-counter {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── progress ── */
+    .progress-track {
+      position: fixed;
+      top: 64px; left: 0; right: 0;
+      height: 2px;
+      background: var(--border);
+      z-index: 50;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--aws);
+      transition: width 300ms ease;
+    }
+
+    /* ── slide engine ── */
+    .deck {
+      position: relative;
+      height: 100vh;
+      z-index: 1;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 64px 0 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(16px);
+      transition: opacity 400ms ease, transform 400ms ease, visibility 400ms ease;
+    }
+
+    .slide.active {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .slide-inner {
+      width: 100%;
+      max-width: 1360px;
+      padding: 0 60px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 72px;
+      align-items: center;
+    }
+
+    .slide-inner.full {
+      grid-template-columns: 1fr;
+      max-width: 860px;
+      text-align: center;
+    }
+
+    /* ── text column ── */
+    .text-col { display: flex; flex-direction: column; gap: 0; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--aws);
+      margin-bottom: 18px;
+    }
+
+    .eyebrow-line {
+      width: 24px; height: 1.5px;
+      background: var(--aws);
+      flex-shrink: 0;
+    }
+
+    h1, h2 {
+      font-family: 'DM Serif Display', Georgia, serif;
+      font-weight: 400;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      margin-bottom: 24px;
+    }
+
+    h1 { font-size: clamp(2rem, 2.8vw, 3.2rem); max-width: 16ch; }
+    h2 { font-size: clamp(1.7rem, 2.4vw, 2.8rem); max-width: 17ch; }
+
+    h1 em, h2 em {
+      font-style: italic;
+      color: var(--aws);
+    }
+
+    .body-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .body-stack p {
+      font-size: clamp(0.92rem, 1.05vw, 1.05rem);
+      line-height: 1.7;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .body-stack strong { color: var(--ink); font-weight: 600; }
+
+    /* ── visual panel ── */
+    .viz-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border-2);
+      border-radius: 20px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .viz-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,153,0,0.4), transparent);
+    }
+
+    /* ──────────────────────────────────────────
+       SLIDE 1 — bar chart anomaly visual
+    ────────────────────────────────────────── */
+    .anomaly-chart {
+      padding: 36px 40px 40px;
+    }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+
+    .chart-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .chart-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--red);
+      background: var(--red-dim);
+      border: 1px solid rgba(239,68,68,0.25);
+      padding: 4px 10px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chart-badge::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--red);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .bar-row:last-child { margin-bottom: 0; }
+
+    .bar-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      width: 86px;
+      flex-shrink: 0;
+      text-align: right;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 28px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      background: linear-gradient(90deg, rgba(255,153,0,0.7), rgba(255,153,0,0.45));
+      position: relative;
+    }
+
+    .bar-fill.anomaly {
+      background: linear-gradient(90deg, #ef4444, rgba(239,68,68,0.6));
+    }
+
+    .bar-value {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .bar-fill.anomaly .bar-inner-label {
+      position: absolute;
+      right: -70px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--red);
+      white-space: nowrap;
+    }
+
+    .chart-divider {
+      margin: 28px 0;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .chart-footer {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .chart-stat {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+
+    .chart-stat-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 6px;
+    }
+
+    .chart-stat-value {
+      font-family: 'DM Serif Display', serif;
+      font-size: 20px;
+      color: var(--ink);
+    }
+
+    .chart-stat-value.bad { color: var(--red); }
+    .chart-stat-value.good { color: var(--green); }
+
+    /* ──────────────────────────────────────────
+       SLIDE 2 — adaptive path diagram
+    ────────────────────────────────────────── */
+    .path-diagram {
+      padding: 32px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .path-node {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      position: relative;
+    }
+
+    .path-node + .path-node {
+      margin-top: 0;
+    }
+
+    .node-spine {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      width: 36px;
+    }
+
+    .node-dot {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+      z-index: 1;
+    }
+
+    .node-dot.flag  { background: var(--red-dim);   border: 1.5px solid rgba(239,68,68,0.35);  color: var(--red);  }
+    .node-dot.brain { background: var(--aws-dim);   border: 1.5px solid rgba(255,153,0,0.35);  color: var(--aws);  }
+    .node-dot.check { background: var(--green-dim); border: 1.5px solid rgba(52,211,153,0.3);  color: var(--green);}
+    .node-dot.out   { background: rgba(255,255,255,0.04); border: 1.5px solid var(--border-2); color: var(--muted);}
+
+    .node-connector {
+      width: 1.5px;
+      flex: 1;
+      min-height: 20px;
+      background: var(--border-2);
+      margin: 4px 0;
+    }
+
+    .node-body {
+      padding: 10px 0 22px;
+      flex: 1;
+    }
+
+    .node-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .node-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    /* branch indicator */
+    .branch-hint {
+      display: inline-flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .branch-pill {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border-2);
+      color: var(--muted);
+    }
+
+    .branch-pill.active-pill {
+      background: var(--aws-dim);
+      border-color: rgba(255,153,0,0.3);
+      color: var(--aws);
+    }
+
+    .branch-pill.skip-pill {
+      opacity: 0.4;
+      text-decoration: line-through;
+    }
+
+    /* ──────────────────────────────────────────
+       SLIDE 3 — stack comparison
+    ────────────────────────────────────────── */
+    .stack-panel {
+      padding: 32px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .stack-header-row {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px;
+      gap: 8px;
+      padding: 0 0 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stack-col-head {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      text-align: center;
+    }
+
+    .stack-col-head.highlight { color: var(--aws); }
+
+    .stack-row {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px;
+      gap: 8px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid transparent;
+    }
+
+    .stack-row:hover {
+      border-color: var(--border);
+    }
+
+    .stack-row-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .stack-row-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .stack-cell {
+      text-align: center;
+      font-size: 18px;
+    }
+
+    .cell-good { color: var(--green); }
+    .cell-mid  { color: var(--aws);   }
+    .cell-bad  { color: var(--red);   opacity: 0.6; }
+
+    .stack-divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    .stack-note {
+      font-size: 12px;
+      color: var(--dim);
+      line-height: 1.6;
+      padding: 10px 14px;
+      border-left: 2px solid rgba(255,153,0,0.3);
+    }
+
+    /* ──────────────────────────────────────────
+       SLIDE 4 — demo
+    ────────────────────────────────────────── */
+    .demo-wrap {
+      margin-top: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .demo-country-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-2);
+      border-radius: 16px;
+      padding: 28px 24px;
+    }
+
+    .demo-country-card.featured {
+      border-color: rgba(255,153,0,0.3);
+      background: linear-gradient(160deg, rgba(255,153,0,0.06), var(--bg-card));
+    }
+
+    .demo-country-name {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    .demo-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .demo-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .demo-step.ran {
+      background: rgba(255,153,0,0.1);
+      border: 1px solid rgba(255,153,0,0.2);
+      color: var(--ink);
+    }
+
+    .demo-step.skipped {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      color: var(--dim);
+      text-decoration: line-through;
+      text-decoration-color: var(--dim);
+    }
+
+    .step-icon {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+    }
+
+    .step-icon.run  { background: var(--aws);  color: #000; }
+    .step-icon.skip { background: var(--border); color: var(--dim); }
+
+    .demo-footer {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .demo-count {
+      font-size: 22px;
+      font-family: 'DM Serif Display', serif;
+      color: var(--ink);
+    }
+
+    .demo-count span {
+      font-size: 12px;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      color: var(--muted);
+      display: block;
+      margin-top: 2px;
+    }
+
+    .demo-verdict {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 999px;
+    }
+
+    .demo-verdict.same {
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid rgba(52,211,153,0.25);
+    }
+
+    .demo-cta {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 56ch;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .demo-cta strong { color: var(--aws); font-weight: 600; }
+
+    /* ── navigation ── */
+    .nav {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      z-index: 50;
+      background: rgba(20,24,32,0.82);
+      border: 1px solid var(--border-2);
+      backdrop-filter: blur(20px);
+      padding: 10px 16px;
+      border-radius: 999px;
+    }
+
+    .nav-btn {
+      width: 36px; height: 36px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 160ms, background 160ms;
+    }
+
+    .nav-btn:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
+    .nav-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+    .nav-btn:disabled:hover { color: var(--muted); background: transparent; }
+    .nav-btn svg { width: 18px; height: 18px; }
+
+    .nav-dots {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .nav-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--dim);
+      cursor: pointer;
+      transition: background 200ms, transform 200ms, width 200ms;
+    }
+
+    .nav-dot.active {
+      background: var(--aws);
+      width: 22px;
+      border-radius: 999px;
+    }
+
+    .kbd-hint {
+      position: fixed;
+      bottom: 40px;
+      right: 40px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--dim);
+      z-index: 50;
+    }
+
+    .kbd {
+      padding: 3px 7px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-2);
+      border-radius: 5px;
+      font-size: 11px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- topbar -->
+  <header class="topbar">
+    <div class="aws-logo">
+      <svg width="72" height="43" viewBox="0 0 304 182" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#fff" d="M86.4 66.4c0 3.7.4 6.7 1.1 8.9.8 2.2 1.8 4.6 3.2 7.2.5.8.7 1.6.7 2.3 0 1-.6 2-1.9 3l-6.3 4.2c-.9.6-1.8.9-2.6.9-1 0-2-.5-3-1.4-1.4-1.5-2.6-3.1-3.6-4.7-1-1.7-2-3.6-3.1-5.9-7.8 9.2-17.6 13.8-29.4 13.8-8.4 0-15.1-2.4-20-7.2-4.9-4.8-7.4-11.2-7.4-19.2 0-8.5 3-15.4 9.1-20.6 6.1-5.2 14.2-7.8 24.5-7.8 3.4 0 6.9.3 10.6.8 3.7.5 7.5 1.3 11.5 2.2v-7.3c0-7.6-1.6-12.9-4.7-16-3.2-3.1-8.6-4.6-16.3-4.6-3.5 0-7.1.4-10.8 1.3-3.7.9-7.3 2-10.8 3.4-1.6.7-2.8 1.1-3.5 1.3-.7.2-1.2.3-1.6.3-1.4 0-2.1-1-2.1-3.1v-4.9c0-1.6.2-2.8.7-3.5.5-.7 1.4-1.4 2.8-2.1 3.5-1.8 7.7-3.3 12.6-4.5 4.9-1.3 10.1-1.9 15.6-1.9 11.9 0 20.6 2.7 26.2 8.1 5.5 5.4 8.3 13.6 8.3 24.6v32.4zM45.8 81.6c3.3 0 6.7-.6 10.3-1.8 3.6-1.2 6.8-3.4 9.5-6.4 1.6-1.9 2.8-4 3.4-6.4.6-2.4 1-5.3 1-8.7v-4.2c-2.9-.7-6-1.3-9.2-1.7-3.2-.4-6.3-.6-9.4-.6-6.7 0-11.6 1.3-14.9 4-3.3 2.7-4.9 6.5-4.9 11.5 0 4.7 1.2 8.2 3.7 10.6 2.4 2.5 5.9 3.7 10.5 3.7zm80.3 10.8c-1.8 0-3-.3-3.8-1-.8-.6-1.5-2-2.1-3.9L98.6 10.2c-.6-2-.9-3.3-.9-4 0-1.6.8-2.5 2.4-2.5h9.8c1.9 0 3.2.3 3.9 1 .8.6 1.4 2 2 3.9l16.8 66.2 15.6-66.2c.5-2 1.1-3.3 1.9-3.9.8-.6 2.2-1 4-1h8c1.9 0 3.2.3 4 1 .8.6 1.5 2 1.9 3.9l15.8 67 17.3-67c.6-2 1.3-3.3 2-3.9.8-.6 2.1-1 3.9-1h9.3c1.6 0 2.5.8 2.5 2.5 0 .5-.1 1-.2 1.6-.1.6-.3 1.4-.7 2.5l-24.1 77.3c-.6 2-1.3 3.3-2.1 3.9-.8.6-2.1 1-3.8 1h-8.6c-1.9 0-3.2-.3-4-1-.8-.7-1.5-2-1.9-4l-15.5-64.5-15.4 64.4c-.5 2-1.1 3.3-1.9 4-.8.7-2.2 1-4 1h-8.6zm128.5 2.7c-5.2 0-10.4-.6-15.4-1.8-5-1.2-8.9-2.5-11.5-4-1.6-.9-2.7-1.9-3.1-2.8-.4-.9-.6-1.9-.6-2.8v-5.1c0-2.1.8-3.1 2.3-3.1.6 0 1.2.1 1.8.3.6.2 1.5.6 2.5 1 3.4 1.5 7.1 2.7 11 3.5 4 .8 7.9 1.2 11.9 1.2 6.3 0 11.2-1.1 14.6-3.3 3.4-2.2 5.2-5.4 5.2-9.5 0-2.8-.9-5.1-2.7-7-1.8-1.9-5.2-3.6-10.1-5.2l-14.5-4.5c-7.3-2.3-12.7-5.7-16-10.2-3.3-4.4-5-9.3-5-14.5 0-4.2.9-7.9 2.7-11.1 1.8-3.2 4.2-6 7.2-8.2 3-2.3 6.4-4 10.4-5.2 4-1.2 8.2-1.7 12.6-1.7 2.2 0 4.5.1 6.7.4 2.3.3 4.4.7 6.5 1.1 2 .5 3.9 1 5.7 1.6 1.8.6 3.2 1.2 4.2 1.8 1.4.8 2.4 1.6 3 2.5.6.8.9 1.9.9 3.3v4.7c0 2.1-.8 3.2-2.3 3.2-.8 0-2.1-.4-3.8-1.2-5.7-2.6-12.1-3.9-19.2-3.9-5.7 0-10.2.9-13.3 2.8-3.1 1.9-4.7 4.8-4.7 8.9 0 2.8 1 5.2 3 7.1 2 1.9 5.7 3.8 11 5.5l14.2 4.5c7.2 2.3 12.4 5.5 15.5 9.6 3.1 4.1 4.6 8.8 4.6 14 0 4.3-.9 8.2-2.6 11.6-1.8 3.4-4.2 6.4-7.3 8.8-3.1 2.5-6.8 4.3-11.1 5.6-4.5 1.4-9.2 2.1-14.3 2.1z"/>
+        <path fill="#F90" d="M273.5 143.7c-32.9 24.3-80.7 37.2-121.8 37.2-57.6 0-109.5-21.3-148.7-56.7-3.1-2.8-.3-6.6 3.4-4.4 42.4 24.6 94.7 39.5 148.8 39.5 36.5 0 76.6-7.6 113.5-23.2 5.5-2.5 10.2 3.6 4.8 7.6zM287.2 128.1c-4.2-5.4-27.8-2.6-38.5-1.3-3.2.4-3.7-2.4-.8-4.5 18.8-13.2 49.7-9.4 53.3-5 3.6 4.5-1 35.4-18.6 50.2-2.7 2.3-5.3 1.1-4.1-1.9 4-9.9 12.9-32.2 8.7-37.5z"/>
+      </svg>
+    </div>
+    <div class="topbar-right">
+      <div class="product-tag">Nova Pro v1 · Incident Investigator</div>
+      <div class="slide-counter" id="counter">1 / 4</div>
+    </div>
+  </header>
+
+  <!-- progress -->
+  <div class="progress-track">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+
+  <!-- deck -->
+  <div class="deck">
+
+    <!-- SLIDE 1: Problem -->
+    <div class="slide active" data-slide="1">
+      <div class="slide-inner">
+        <div class="text-col">
+          <div class="eyebrow"><span class="eyebrow-line"></span>01 &nbsp;·&nbsp; Problem</div>
+          <h1>Detection is instant. Debugging is <em>still slow.</em></h1>
+          <div class="body-stack">
+            <p><strong>A lead source drops suddenly.</strong> A LinkedIn form stops sending leads. The alert fires in seconds.</p>
+            <p>But the investigation path changes every time depending on what the data shows. Teams must check multiple signals, assess scope, and explain the issue in plain language to non-technical stakeholders.</p>
+            <p><strong>That last part does not scale with fixed rules.</strong></p>
+          </div>
+        </div>
+
+        <div class="viz-panel">
+          <div class="anomaly-chart">
+            <div class="chart-header">
+              <div class="chart-title">Lead volume by source &nbsp;·&nbsp; last 24h</div>
+              <div class="chart-badge">Anomaly detected</div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-label">LinkedIn</div>
+              <div class="bar-track">
+                <div class="bar-fill anomaly" style="width:14%;">
+                  <span class="bar-inner-label">↓ 86%</span>
+                </div>
+              </div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">Web Form</div>
+              <div class="bar-track">
+                <div class="bar-fill" style="width:88%;">
+                  <span class="bar-value">88</span>
+                </div>
+              </div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">Lead API</div>
+              <div class="bar-track">
+                <div class="bar-fill" style="width:74%;">
+                  <span class="bar-value">74</span>
+                </div>
+              </div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">Facebook</div>
+              <div class="bar-track">
+                <div class="bar-fill" style="width:62%;">
+                  <span class="bar-value">62</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-divider"></div>
+
+            <div class="chart-footer">
+              <div class="chart-stat">
+                <div class="chart-stat-label">Detection</div>
+                <div class="chart-stat-value good">&lt; 1 min</div>
+              </div>
+              <div class="chart-stat">
+                <div class="chart-stat-label">Avg. debug time</div>
+                <div class="chart-stat-value bad">47 min</div>
+              </div>
+              <div class="chart-stat">
+                <div class="chart-stat-label">Root cause</div>
+                <div class="chart-stat-value" style="font-size:15px; color: var(--muted);">Manual</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 2: Solution -->
+    <div class="slide" data-slide="2">
+      <div class="slide-inner">
+        <div class="text-col">
+          <div class="eyebrow"><span class="eyebrow-line"></span>02 &nbsp;·&nbsp; Solution</div>
+          <h2>The key step is not running queries. It is <em>deciding which ones to run.</em></h2>
+          <div class="body-stack">
+            <p>Deterministic logic flags the suspicious country and source combination.</p>
+            <p>Nova receives the incident and a bounded query set. Based on what each query returns, Nova decides whether the next query is necessary or already answered.</p>
+            <p><strong>Output: verdict, pattern, explanation, operational impact.</strong></p>
+          </div>
+        </div>
+
+        <div class="viz-panel">
+          <div class="path-diagram">
+
+            <div class="path-node">
+              <div class="node-spine">
+                <div class="node-dot flag">!</div>
+                <div class="node-connector"></div>
+              </div>
+              <div class="node-body">
+                <div class="node-title">Anomaly flagged</div>
+                <div class="node-desc">Deterministic detector identifies LinkedIn / DE combination as suspicious.</div>
+              </div>
+            </div>
+
+            <div class="path-node">
+              <div class="node-spine">
+                <div class="node-dot brain">N</div>
+                <div class="node-connector"></div>
+              </div>
+              <div class="node-body">
+                <div class="node-title">Nova receives incident</div>
+                <div class="node-desc">Bounded query set loaded. Nova reads the first result before deciding to continue.</div>
+                <div class="branch-hint">
+                  <span class="branch-pill active-pill">target trend</span>
+                  <span class="branch-pill active-pill">country peers</span>
+                  <span class="branch-pill active-pill">source family</span>
+                  <span class="branch-pill active-pill">last seen</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="path-node">
+              <div class="node-spine">
+                <div class="node-dot check">✓</div>
+                <div class="node-connector"></div>
+              </div>
+              <div class="node-body">
+                <div class="node-title">Adaptive execution</div>
+                <div class="node-desc">If the first two queries answer the scope question, the remaining ones are skipped entirely.</div>
+                <div class="branch-hint">
+                  <span class="branch-pill active-pill">target trend</span>
+                  <span class="branch-pill active-pill">country peers</span>
+                  <span class="branch-pill skip-pill">source family</span>
+                  <span class="branch-pill skip-pill">last seen</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="path-node">
+              <div class="node-spine">
+                <div class="node-dot out">↗</div>
+              </div>
+              <div class="node-body">
+                <div class="node-title">Structured report</div>
+                <div class="node-desc">Verdict · pattern · plain-language explanation · operational impact.</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+<!-- SLIDE 3: Why Nova? -->
+<div class="slide" data-slide="3">
+  <div class="slide-inner">
+    <div class="text-col">
+      <div class="eyebrow"><span class="eyebrow-line"></span>03 &nbsp;·&nbsp; Why Nova Pro V1?</div>
+      <h2>Rules can say something is wrong. They cannot <em>read the evidence</em> and adjust.</h2>
+      <div class="body-stack">
+        <p>Nova Pro V1 sits in the right position: stronger reasoning than Lite 2, materially cheaper than Pro 2. For bounded incident investigation, that is the correct trade-off.</p>
+        <p>It runs on Bedrock with no new infrastructure to justify. Deeper thinking levels are available when the evidence is genuinely ambiguous.</p>
+        <p><strong>The reasoning happens through tool decisions, not extended compute.</strong></p>
+      </div>
+    </div>
+    <div class="viz-panel">
+      <div class="stack-panel">
+
+        <div class="stack-header-row" style="grid-template-columns: 1fr 72px 72px 72px 72px;">
+          <div class="stack-col-head" style="text-align:left;">Requirement</div>
+          <div class="stack-col-head">Lite 2</div>
+          <div class="stack-col-head highlight">Pro V1</div>
+          <div class="stack-col-head">Pro 2</div>
+          <div class="stack-col-head">Others</div>
+        </div>
+
+        <div class="stack-row" style="grid-template-columns: 1fr 72px 72px 72px 72px;">
+          <div>
+            <div class="stack-row-label">Reasoning depth</div>
+            <div class="stack-row-sub">For adaptive investigation</div>
+          </div>
+          <div class="stack-cell cell-mid">~</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-mid">~</div>
+        </div>
+
+        <div class="stack-row" style="grid-template-columns: 1fr 72px 72px 72px 72px;">
+          <div>
+            <div class="stack-row-label">Cost at scale</div>
+            <div class="stack-row-sub">Per-incident token cost</div>
+          </div>
+          <div class="stack-cell cell-good">Low</div>
+          <div class="stack-cell cell-good">Low</div>
+          <div class="stack-cell cell-bad">High</div>
+          <div class="stack-cell cell-bad">High</div>
+        </div>
+
+        <div class="stack-row" style="grid-template-columns: 1fr 72px 72px 72px 72px;">
+          <div>
+            <div class="stack-row-label">Bounded tool use</div>
+            <div class="stack-row-sub">Constrained query set</div>
+          </div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-mid">~</div>
+        </div>
+
+        <div class="stack-row" style="grid-template-columns: 1fr 72px 72px 72px 72px;">
+          <div>
+            <div class="stack-row-label">Native infrastructure</div>
+            <div class="stack-row-sub">No new platform needed</div>
+          </div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-good">✓</div>
+          <div class="stack-cell cell-bad">✗</div>
+        </div>
+
+        <div class="stack-divider"></div>
+
+        <div class="stack-note">
+          Pro 2 has stronger reasoning but costs more per token with no measurable gain for bounded queries. Lite 2 is cheaper but undershoots on reasoning. <strong style="color: var(--aws);">Pro V1 is the right fit.</strong>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+    <!-- SLIDE 4: Demo -->
+    <div class="slide" data-slide="4">
+      <div class="slide-inner full">
+        <div>
+          <div class="eyebrow" style="justify-content:center;margin-top:25px;"><span class="eyebrow-line"></span>04 &nbsp;·&nbsp; Demo</div>
+          <h2 style="margin: 0 auto 16px; max-width: 22ch;">Watch how Nova works within this workflow.</h2>
+
+          <div class="demo-wrap">
+            <div class="demo-country-card">
+              <div class="demo-country-name">Country A &nbsp;·&nbsp; First investigation</div>
+              <div class="demo-steps">
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  target trend
+                </div>
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  country peers
+                </div>
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  source family
+                </div>
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  last seen event
+                </div>
+              </div>
+              <div class="demo-footer">
+                <div class="demo-count">4 queries<span>full investigation path</span></div>
+                <div class="demo-verdict same">Confirmed</div>
+              </div>
+            </div>
+
+            <div class="demo-country-card featured">
+              <div class="demo-country-name">Country B &nbsp;·&nbsp; Knows the scope already</div>
+              <div class="demo-steps">
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  target trend
+                </div>
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  country peers
+                </div>
+                <div class="demo-step skipped">
+                  <div class="step-icon skip">—</div>
+                  source family
+                </div>
+                <div class="demo-step ran">
+                  <div class="step-icon run">✓</div>
+                  last seen event
+                </div>
+              </div>
+              <div class="demo-footer">
+                <div class="demo-count">3 queries<span>evidence already answered</span></div>
+                <div class="demo-verdict same">Confirmed</div>
+              </div>
+            </div>
+          </div>
+
+          <p class="demo-cta">
+            Same verdict quality. Less queries. 
+          </p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /deck -->
+
+  <!-- nav -->
+  <nav class="nav">
+    <button class="nav-btn" id="prev-btn" disabled>
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </button>
+    <div class="nav-dots" id="nav-dots"></div>
+    <button class="nav-btn" id="next-btn">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    </button>
+  </nav>
+
+  <div class="kbd-hint">
+    <span class="kbd">←</span>
+    <span class="kbd">→</span>
+    to navigate
+  </div>
+
+  <script>
+    const slides   = Array.from(document.querySelectorAll('.slide'));
+    const counter  = document.getElementById('counter');
+    const fill     = document.getElementById('progress-fill');
+    const prevBtn  = document.getElementById('prev-btn');
+    const nextBtn  = document.getElementById('next-btn');
+    const dotsWrap = document.getElementById('nav-dots');
+    const total    = slides.length;
+    let current    = 0;
+
+    // build dots
+    slides.forEach((_, i) => {
+      const d = document.createElement('div');
+      d.className = 'nav-dot' + (i === 0 ? ' active' : '');
+      d.addEventListener('click', () => go(i));
+      dotsWrap.appendChild(d);
+    });
+
+    function go(n) {
+      if (n < 0 || n >= total) return;
+      slides[current].classList.remove('active');
+      dotsWrap.children[current].classList.remove('active');
+      current = n;
+      slides[current].classList.add('active');
+      dotsWrap.children[current].classList.add('active');
+      counter.textContent = `${current + 1} / ${total}`;
+      fill.style.width = `${((current + 1) / total) * 100}%`;
+      prevBtn.disabled = current === 0;
+      nextBtn.disabled = current === total - 1;
+    }
+
+    prevBtn.addEventListener('click', () => go(current - 1));
+    nextBtn.addEventListener('click', () => go(current + 1));
+
+    document.addEventListener('keydown', e => {
+      if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); go(current + 1); }
+      if (['ArrowLeft', 'PageUp'].includes(e.key))          { e.preventDefault(); go(current - 1); }
+      if (e.key === 'Home') { e.preventDefault(); go(0); }
+      if (e.key === 'End')  { e.preventDefault(); go(total - 1); }
+    });
+
+    // init
+    fill.style.width = `${(1 / total) * 100}%`;
+  </script>
+</body>
+</html>
