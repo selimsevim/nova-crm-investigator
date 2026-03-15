@@ -1,4 +1,4 @@
-# Autonomous CRM Incident Investigator (Hackathon)
+# Autonomous CRM Incident Investigator
 
 **Built for the AWS & Amazon Nova Hackathon** 
 
