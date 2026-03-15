@@ -1,6 +1,6 @@
-# Autonomous CRM Incident Investigator
+# Autonomous CRM Incident Investigator (Hackathon)
 
-⚡ **Built for the AWS & Amazon Nova Hackathon** ⚡
+**Built for the AWS & Amazon Nova Hackathon** 
 
 An autonomous, agentic system powered by **Amazon Nova Pro v1** deployed on **Amazon Bedrock** and **Amazon Athena** that detects, traces, and diagnoses CRM data pipeline anomalies (specifically, source volume drops) in seconds.
 
